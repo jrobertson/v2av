@@ -73,22 +73,38 @@ class V2av
   using ColouredText
   using TimeHelper
   include WavTool
+  
+  attr_accessor :steps, :duration
 
   def initialize(src, srt, working_dir: '/tmp/v2av', debug: false, 
       pollyspeech: {access_key: nil, secret_key: nil, voice_id: 'Amy', 
                  cache_filepath: '/tmp/v2av/pollyspeech/cache'})
 
-    @working_dir, @debug = working_dir, debug
+    @source, @working_dir, @debug = src, working_dir, debug
 
     @steps = srt.lines.map do |x| 
-      raw_time, desc = rx.split(/ +/,)
+      raw_time, desc = x.chomp.split(/ +/,2)
       OpenStruct.new({time: raw_time.to_i, desc: desc})
     end
+    
+    s = `exiftool #{src}`
+    puts 's: ' + s.inspect if @debug
+    #a = s[/Duration.*(\d{1,2}:\d{2}:\d{2})/,1].split(':').map(&:to_i)
+    #@duration = Subunit.new(units={minutes:60, hours:60, seconds: 0}, a).to_i
+    @duration = s[/Duration.*: (\d+)/,1].to_i        
+    puts ('@duration: ' + @duration.inspect).debug if @debug
+    
+    @steps[0..-2].each.with_index do |x, i|
+      x.duration = @steps[i+1].time - x.time
+    end
+    
+    @steps.last.duration = @duration - @steps.last.time    
 
     @pollyspeech = PollySpeech.new(pollyspeech) if pollyspeech[:access_key]
+    
   end
 
-  def build()
+  def build(destination)
 
     if block_given? then
 
@@ -96,19 +112,16 @@ class V2av
 
     else
 
-      dir = File.dirname(source)
-      file = File.basename(source)
+      dir = File.dirname(@source)
+      file = File.basename(@source)      
       
-      tidy!
-      
-      vid2 = File.join(dir, file.sub(/\.mp4$/,'b\0'))
-      trim_video source, vid2
-      
-      vid3 = File.join(dir, file.sub(/\.mp4$/,'c.avi'))
+      vid2 = File.join(@working_dir, file.sub(/\.mp4$/,'b\0'))
+      trim_video @source, vid2
+
+      vid3 = File.join(@working_dir, file.sub(/\.mp4$/,'c.avi'))
 
       generate_audio
       add_audio_track File.join(@working_dir, 'audio.wav'), vid2, vid3
-
       
       vid4 = File.join(dir, file.sub(/\.avi$/,'d\0'))
       resize_video vid3, vid4
@@ -132,6 +145,7 @@ class V2av
       yield(audio_file, video_file, target_video)
     else
       `ffmpeg -i #{video_file} -i #{audio_file} -codec copy -shortest #{target_video} -y`
+      #"ffmpeg -i #{video_file} -i #{audio_file} -codec copy -shortest #{target_video} -y"
     end
     
   end
@@ -212,47 +226,12 @@ class V2av
     `ffmpeg -i #{source} -vf scale="720:-1" #{destination} -y`
   end
   
-  def tidy!()
-
-    verbose_level = 0
-
-    @steps.each do |x|
-
-      x.desc.gsub!(/\s*\([^\)]+\)\s*/,'')
-      x.desc.sub!(/ in "\w+"$/,'')
-      x.desc.sub!(/"User account for [^"]+"/,'the User account icon.')
-      
-      if x.desc =~ /User left click/ and verbose_level == 0 then
-
-        x.desc.sub!(/User left click/, 'Using the mouse, left click')
-        verbose_level = 1
-
-      elsif x.desc =~ /User left click/ and verbose_level == 1
-
-        x.desc.sub!(/User left click/, 'Left click')
-        verbose_level = 2
-
-      elsif x.desc =~ /User left click/ and verbose_level == 2
-
-        x.desc.sub!(/User left click/, 'Click')
-        verbose_level = 3
-
-      elsif x.desc =~ /User left click/ and verbose_level == 3
-
-        x.desc.sub!(/User left click on/, 'Select')
-
-      else
-        verbose_level = 0
-      end
-
-    end
-    
-  end
-
+  
   def to_srt(offset=-(@steps.first.time - 1))
 
     lines = to_subtitles(offset).strip.lines.map.with_index do |x, i|
 
+      puts ('x: ' + x.inspect).debug if @debug
       raw_times, subtitle = x.split(/ /,2)
       puts ('raw_times: ' + raw_times.inspect).debug if @debug
       start_time, end_time = raw_times.split('-',2)
@@ -300,7 +279,8 @@ class V2av
   
   def trim_video(video, newvideo)
     
-    start = @steps.first.time - 4
+    start = @steps.first.time > 4 ? @steps.first.time - 4 : @steps.first.time
+    
     t1, t2 = [start, @steps.last.time - 2 ].map do |step|
       "%02d:%02d:%02d" % (step.to_hms.reverse + [0,0]).take(3).reverse
     end
@@ -311,5 +291,3 @@ class V2av
 
 end
 
-v2 = V2av.new('video.mp4', 's.srt', working_dir: '/tmp/v2av')
-v2.build('video2.mp4')
