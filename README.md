@@ -4,8 +4,22 @@
 
     require 'v2av'
 
-    v2 = V2av.new('video.mp4', 's.srt', working_dir: '/tmp/v2av')
+    s = %q(10 Using the mouse, left click on "Family & other people"
+    16 Left click on "Add someone else to this PC"
+    27 Click on "I don't have this person's sign-in information"
+    36 select "Add a user without a Microsoft account"
+    44 Type the name, skip the password, and click next.)
+
+    pollyspeech = {
+      :access_key=>"AMAZON_ACCESSKEY", 
+      :secret_key=>"AMAZON_SECRET_KEY", 
+      :voice_id=>"Emma", 
+      :cache_filepath=>"/home/james/tmp/pollyspeech/cache"
+    }
+    v2 = V2av.new('/tmp/docs/adduser14.mp4', s, working_dir: '/tmp/v2av', 
+                  pollyspeech: pollyspeech, debug: true)
     v2.build('video2.mp4')
+
 
 
 ## Resources
